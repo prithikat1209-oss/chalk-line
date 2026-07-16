@@ -1,5 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Check, ChevronDown, ChevronRight, Trash2, Copy, X, LogOut, Loader2 } from "lucide-react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBJ7v2WgWy5b-kf26g9be-AV1lxwgUZ79k",
+  authDomain: "chalkline-a2023.firebaseapp.com",
+  projectId: "chalkline-a2023",
+  storageBucket: "chalkline-a2023.firebasestorage.app",
+  messagingSenderId: "277834389268",
+  appId: "1:277834389268:web:e277162c9300af29929401",
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
 
 const FONT_STYLE = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500;1,9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -26,9 +40,7 @@ const FONT_STYLE = `
 .chalk-display { font-family: 'Fraunces', serif; }
 .chalk-mono { font-family: 'IBM Plex Mono', monospace; }
 
-.chalk-dashed {
-  border: 1.5px dashed var(--rule);
-}
+.chalk-dashed { border: 1.5px dashed var(--rule); }
 .chalk-checkbox {
   width: 22px; height: 22px; border-radius: 4px 6px 5px 7px / 6px 4px 7px 5px;
   border: 2px solid var(--ink-dim);
@@ -74,11 +86,7 @@ const FONT_STYLE = `
 .chalk-btn-primary:hover { opacity: 0.9; }
 .chalk-btn-ghost { background: transparent; color: var(--ink-dim); border: 1.5px solid var(--rule); }
 .chalk-btn-ghost:hover { color: var(--ink); border-color: var(--ink-dim); }
-.chalk-card {
-  background: var(--panel);
-  border-radius: 10px;
-  border: 1.5px solid var(--rule);
-}
+.chalk-card { background: var(--panel); border-radius: 10px; border: 1.5px solid var(--rule); }
 .chalk-focus:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 `;
 
@@ -117,7 +125,7 @@ function dateBucket(dueDate) {
 }
 
 export default function CollegePlanner() {
-  const [phase, setPhase] = useState("loading");
+  const [phase, setPhase] = useState("gate");
   const [roomCode, setRoomCode] = useState(null);
   const [joinInput, setJoinInput] = useState("");
   const [tasks, setTasks] = useState([]);
@@ -133,33 +141,31 @@ export default function CollegePlanner() {
   const [subtaskDraft, setSubtaskDraft] = useState("");
 
   useEffect(() => {
-    setPhase("gate");
-  }, []);
-
-  const loadTasks = useCallback(async (code) => {
+    if (!roomCode) return;
     setError("");
-    try {
-      const res = await window.storage.get(`planner:${code}`, true);
-      if (res && res.value) {
-        setTasks(JSON.parse(res.value));
-      } else {
-        setTasks([]);
+    const ref = doc(db, "planners", roomCode);
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          setTasks(snap.data().tasks || []);
+        } else {
+          setTasks([]);
+        }
+      },
+      (err) => {
+        setError("Couldn't connect to the shared planner. Check your connection and try again.");
       }
-      setRoomCode(code);
-      setPhase("app");
-    } catch (e) {
-      setTasks([]);
-      setRoomCode(code);
-      setPhase("app");
-    }
-  }, []);
+    );
+    return () => unsubscribe();
+  }, [roomCode]);
 
   const saveTasks = useCallback(async (code, nextTasks) => {
     setSaving(true);
     try {
-      await window.storage.set(`planner:${code}`, JSON.stringify(nextTasks), true);
+      await setDoc(doc(db, "planners", code), { tasks: nextTasks, updatedAt: Date.now() });
     } catch (e) {
-      setError("Couldn't save just now. Your changes are shown but may not be shared yet.");
+      setError("Couldn't save just now. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -175,13 +181,23 @@ export default function CollegePlanner() {
 
   const handleCreateNew = () => {
     const code = genCode();
-    loadTasks(code);
+    setTasks([]);
+    setRoomCode(code);
+    setPhase("app");
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     const code = joinInput.trim().toUpperCase();
     if (!code) return;
-    loadTasks(code);
+    setError("");
+    try {
+      const snap = await getDoc(doc(db, "planners", code));
+      setTasks(snap.exists() ? snap.data().tasks || [] : []);
+      setRoomCode(code);
+      setPhase("app");
+    } catch (e) {
+      setError("Couldn't find that planner. Double check the code and try again.");
+    }
   };
 
   const handleLeave = () => {
@@ -266,15 +282,6 @@ export default function CollegePlanner() {
     { key: "none", label: "No date set", color: "var(--ink-dim)" },
   ];
 
-  if (phase === "loading") {
-    return (
-      <div className="chalk-root" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <style>{FONT_STYLE}</style>
-        <Loader2 className="animate-spin" size={28} color="var(--ink-dim)" />
-      </div>
-    );
-  }
-
   if (phase === "gate") {
     return (
       <div className="chalk-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
@@ -309,6 +316,9 @@ export default function CollegePlanner() {
             />
             <button onClick={handleJoin} className="chalk-btn chalk-btn-ghost chalk-focus">Join</button>
           </div>
+          {error && (
+            <p style={{ color: "var(--coral)", fontSize: "12.5px", marginTop: "10px" }}>{error}</p>
+          )}
           <p style={{ color: "var(--ink-faint)", fontSize: "12.5px", marginTop: "14px", lineHeight: 1.5 }}>
             Anyone with the code — a roommate, a parent — can view and check off tasks here too.
           </p>
