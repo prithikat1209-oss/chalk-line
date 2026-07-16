@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, Check, ChevronDown, ChevronRight, Trash2, Copy, X, LogOut, Loader2 } from "lucide-react";
+import { Plus, Check, ChevronDown, ChevronRight, Trash2, Copy, X, LogOut, Loader2, Bell, BellOff } from "lucide-react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, onSnapshot } from "firebase/firestore";
+import { getMessaging, getToken, isSupported } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBJ7v2WgWy5b-kf26g9be-AV1lxwgUZ79k",
@@ -11,6 +12,8 @@ const firebaseConfig = {
   messagingSenderId: "277834389268",
   appId: "1:277834389268:web:e277162c9300af29929401",
 };
+
+const VAPID_KEY = "BN_BYmIRcbXbyaUZp3maNf1nuNV__3fn_e7WSaDFoOFkfxBjqTu8RGDBVDZW_7FfBOgzF1bwlQY0JZa9Byu8vaO";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
@@ -139,7 +142,9 @@ export default function CollegePlanner() {
     title: "", course: "", dueDate: "", priority: "medium", notes: "", subtasks: [],
   });
   const [subtaskDraft, setSubtaskDraft] = useState("");
+  const [notifStatus, setNotifStatus] = useState("unknown"); // unknown | enabled | denied | unsupported
 
+  // Live subscription to the planner document once a room code is set
   useEffect(() => {
     if (!roomCode) return;
     setError("");
@@ -170,6 +175,36 @@ export default function CollegePlanner() {
       setSaving(false);
     }
   }, []);
+
+  const enableNotifications = async () => {
+    try {
+      const supported = await isSupported();
+      if (!supported) {
+        setNotifStatus("unsupported");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setNotifStatus("denied");
+        return;
+      }
+      const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+      const messaging = getMessaging(firebaseApp);
+      const token = await getToken(messaging, {
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: registration,
+      });
+      if (token && roomCode) {
+        await updateDoc(doc(db, "planners", roomCode), {
+          deviceTokens: arrayUnion(token),
+        });
+        setNotifStatus("enabled");
+      }
+    } catch (e) {
+      console.error("Notification setup failed", e);
+      setNotifStatus("denied");
+    }
+  };
 
   const updateTasks = (updater) => {
     setTasks((prev) => {
@@ -342,6 +377,15 @@ export default function CollegePlanner() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div className="chalk-tag chalk-mono" style={{ fontSize: "13px", padding: "4px 10px" }}>{roomCode}</div>
+            <button
+              onClick={enableNotifications}
+              className="chalk-btn chalk-btn-ghost chalk-focus"
+              style={{ padding: "6px 10px", display: "flex", alignItems: "center", gap: "5px" }}
+              aria-label="Enable reminders"
+              title={notifStatus === "enabled" ? "Reminders on" : "Turn on reminders"}
+            >
+              {notifStatus === "enabled" ? <Bell size={14} /> : <BellOff size={14} />}
+            </button>
             <button onClick={handleCopy} className="chalk-btn chalk-btn-ghost chalk-focus" style={{ padding: "6px 10px", fontSize: "12px", display: "flex", alignItems: "center", gap: "5px" }}>
               <Copy size={13} /> {copyLabel}
             </button>
@@ -349,6 +393,11 @@ export default function CollegePlanner() {
               <LogOut size={14} />
             </button>
           </div>
+          {notifStatus === "denied" && (
+            <p style={{ width: "100%", color: "var(--coral)", fontSize: "12px", marginTop: "6px" }}>
+              Notifications were blocked. Enable them in your browser/phone settings to get reminders.
+            </p>
+          )}
         </div>
 
         {error && (
