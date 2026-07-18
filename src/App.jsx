@@ -13,7 +13,7 @@ const firebaseConfig = {
   appId: "1:277834389268:web:e277162c9300af29929401",
 };
 
-const VAPID_KEY = "BN_BYmIRcbXbyaUZp3maNf1nuNV__3fn_e7WSaDFoOFkfxBjqTu8RGDBVDZW_7FfBOgzF1bwlQY0JZa9Byu8vaO";
+const VAPID_KEY = "BPJ0D5LsKqoR-zInl-RVQiksZ5upOPByTaMeZgLaY7puVQI-B74cduik8uBiyrs2qD6JdsjTj0Fct6ll7N1IztM";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
